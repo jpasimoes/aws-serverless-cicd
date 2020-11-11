@@ -1,0 +1,386 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodePipeline for Serverless CloudProvider App
+Parameters:
+  EmailAddress:
+    Description: Email Address for sending SNS notifications for CodeCommit
+    Type: String
+  S3Bucket:
+    Description: The name of the S3 bucket that contains the source artifact, which must be in the same region as this stack
+    Type: String
+  SourceS3Key:
+    Default: hello_world.zip
+    Description: The file name of the source artifact, such as myfolder/myartifact.zip
+    Type: String
+  PipelineBucket:
+    Type: String
+    Description: S3Bucket
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+  MyLambdaTrustRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: "/"
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: "*"
+            Version: "2012-10-17"
+          PolicyName: MyLambdaWorkerPolicy
+      RoleName: !Sub ${AWS::StackName}-lambda-${AWS::Region}
+    Type: AWS::IAM::Role
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: codebuild-service
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - lambda:AddPermission
+                  - lambda:CreateFunction
+                  - lambda:DeleteAlias
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetPolicy
+                  - lambda:ListFunctions
+                  - lambda:ListVersionsByFunction
+                  - lambda:PublishVersion
+                  - lambda:RemovePermission
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - apigateway:DeleteApi
+                  - apigateway:DeleteStage
+                  - apigateway:CreateStage
+                  - apigateway:ImportApi
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:PutItem
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - s3:*
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:CreateProject
+                  - codebuild:CreateReport
+                  - codebuild:CreateReportGroup
+                  - codebuild:DeleteProject
+                  - codebuild:ListProjects
+                  - codebuild:StartBuild
+                  - codebuild:UpdateReport
+                  - codebuild:BatchPutTestCases
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                Effect: Allow
+                Resource: "*"
+            Version: "2012-10-17"
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint:
+            Ref: EmailAddress
+          Protocol: email
+  CloudFormationTrustRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+      Path: "/"
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Effect: Allow
+                Resource:
+                  - Fn::Join:
+                      - ""
+                      - - "arn:aws:s3:::"
+                        - Ref: ArtifactBucket
+                  - Fn::Join:
+                      - ""
+                      - - "arn:aws:s3:::"
+                        - Ref: ArtifactBucket
+                        - "/*"
+              - Action:
+                  - apigateway:ImportApi
+                  - apigateway:CreateStage
+                  - apigateway:get*
+                  - apigateway:Delete*
+                  - apigateway:Put*
+                  - apigateway:Post*
+                  - apigateway:Patch*
+                  - apigateway:TagResource
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - codedeploy:*
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - sns:CreateTopic
+                  - sns:DeleteTopic
+                  - sns:GetTopicAttributes
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - codebuild:UpdateReport
+                  - codebuild:CreateReport
+                  - codebuild:BatchPutTestCases
+                  - codebuild:BatchGetBuilds
+                  - codebuild:CreateReportGroup
+                  - codebuild:StartBuild
+                  - codebuild:DeleteBuild
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - cloudwatch:*
+                  - iam:*
+                  - lambda:*
+                  - s3:*
+                  - events:*
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - iam:PassRole
+                Effect: Allow
+                Resource:
+                  - Fn::GetAtt:
+                      - MyLambdaTrustRole
+                      - Arn
+              - Action:
+                  - cloudformation:CreateChangeSet
+                Effect: Allow
+                Resource: "*"
+          PolicyName: CloudFormationRolePolicy
+    Type: AWS::IAM::Role
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: codepipeline-service
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:*
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - iam:PassRole
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - sns:Publish
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: "*"
+                Effect: Allow
+            Version: "2012-10-17"
+  CodeBuildHelloWorldFunction:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: Build application
+      ServiceRole:
+        Fn::GetAtt:
+          - CodeBuildRole
+          - Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        EnvironmentVariables:
+          - Name: S3_BUCKET
+            Value: !Ref PipelineBucket
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: "aws/codebuild/amazonlinux2-x86_64-standard:3.0"
+      Source:
+        BuildSpec: buildspec-lambda.yml
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineBucket
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: "1"
+              Configuration:
+                S3Bucket: !Ref "S3Bucket"
+                S3ObjectKey: !Ref "SourceS3Key"
+              OutputArtifacts:
+                - Name: HelloWorldApp
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - InputArtifacts:
+                - Name: HelloWorldApp
+              Name: PackageSAM
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: Hello-World-Artifact
+              Configuration:
+                ProjectName:
+                  Ref: CodeBuildHelloWorldFunction
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: CreateChangeSet
+              RunOrder: 1
+              InputArtifacts:
+                - Name: Hello-World-Artifact
+              ActionTypeId:
+                Category: Deploy
+                Provider: CloudFormation
+                Owner: AWS
+                Version: "1"
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_IAM
+                ChangeSetName: hello-world-change-set
+                RoleArn:
+                  Fn::GetAtt:
+                    - CloudFormationTrustRole
+                    - Arn
+                StackName: Hello-World-Lambda-Stack
+                TemplatePath: Hello-World-Artifact::package.yml
+            - Name: Approval
+              RunOrder: 2
+              ActionTypeId:
+                Category: Approval
+                Provider: Manual
+                Owner: AWS
+                Version: "1"
+              Configuration:
+                NotificationArn: !Ref MySNSTopic
+                CustomData: "A new change set was created for the Hello-World-Stack stack. Do you want to implement the changes?"
+            - Name: ExecuteStagingChangeSet
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                ChangeSetName: hello-world-change-set
+                RoleArn:
+                  Fn::GetAtt:
+                    - CloudFormationTrustRole
+                    - Arn
+                StackName: Hello-World-Lambda-Stack
+              RunOrder: 3
+Outputs:
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}
+    Description: CodePipeline URL
+  LambdaTrustRole:
+    Description: IAM role for AWS Lambda used for passRole to Lambda functions.
+    Export:
+      Name: !Sub ${AWS::StackName}-${AWS::Region}-LambdaTrustRole
+    Value:
+      Fn::GetAtt:
+        - MyLambdaTrustRole
+        - Arn
